@@ -20,11 +20,12 @@ type TidalState = (Int, Tidal.ParamPattern -> IO(), MVar [(Int, Tidal.ParamPatte
 port = 9162
 
 main = do
-  -- putStrLn $ "TidalCycles websocket server, listening on port " ++ show port
+  putStrLn $ "TidalCycles websocket server, starting on port " ++ show port
   mPatterns <- newMVar []
   mConnectionId <- newMVar 0
-  (cps, getNow) <- Tidal.bpsUtils
-  (d,_) <- Tidal.superDirtSetters getNow
+  -- (cps, getNow) <- Tidal.bpsUtils
+  -- (d,_) <- Tidal.superDirtSetters getNow
+  d <- Tidal.dirtStream
   WS.runServer "0.0.0.0" port $ (\pending -> do
     conn <- WS.acceptRequest pending
     putStrLn $  "received new connection"
