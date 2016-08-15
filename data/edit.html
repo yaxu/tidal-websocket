@@ -2,7 +2,15 @@
 <meta charset="utf-8"/>
 
 <link rel="stylesheet" href="lib/codemirror.css">
-<!-- link rel="stylesheet" href="theme/elegant.css" -->
+<link rel="stylesheet" href="theme/paraiso-dark.css">
+<link rel="stylesheet" href="spicule.css">
+
+<style>
+  body {
+    /* background-color:  #002b36; */
+    background-color:  #2f1e2e;
+}
+</style>
 
 <script src="lib/codemirror.js"></script>
 
@@ -38,6 +46,7 @@
         keyMap: "emacs"
       });
       editor.setOption('readOnly', true);
+      editor.setOption('theme', "paraiso-dark");
 
       ws.onopen = function () {
         // ws.send('/join alex'); // Send the message 'Ping' to the server
@@ -57,10 +66,10 @@
         }
       );
       editor.setOption("extraKeys", {
-        "Ctrl-1": function(cm) {
+        "Ctrl-.": function(cm) {
            ws.send("/eval silence");
         },
-        "Ctrl-2": function(cm) {
+        "Ctrl-0": function(cm) {
            ws.send("/panic");
         },
         "Ctrl-Enter": function(cm) {
