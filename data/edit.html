@@ -1,0 +1,111 @@
+<!doctype html>
+<meta charset="utf-8"/>
+
+<link rel="stylesheet" href="lib/codemirror.css">
+<!-- link rel="stylesheet" href="theme/elegant.css" -->
+
+<script src="lib/codemirror.js"></script>
+
+<script src="keymap/emacs.js"></script>
+<script src="addon/edit/matchbrackets.js"></script>
+<script src="addon/comment/comment.js"></script>
+<script src="addon/dialog/dialog.js"></script>
+<script src="addon/search/searchcursor.js"></script>
+<script src="addon/search/search.js"></script>
+<script src="mode/haskell/haskell.js"></script>
+<script src="osc-browser.js"></script>
+<html>
+<body>
+
+<form><textarea id="code" name="code">
+</textarea></form>
+
+    <script>
+      var connected = false;
+      var changes = [];
+      var ws = new WebSocket('ws://localhost:9162', ['soap']);
+      ws.onmessage = function (e) { console.log("msg: " + e.data) };
+      ws.onerror = function (error) { console.log("ws error" + error) };
+      
+      CodeMirror.commands.save = function() {
+        var elt = editor.getWrapperElement();
+        elt.style.background = "#def";
+        setTimeout(function() { elt.style.background = ""; }, 300);
+      };
+      var editor = CodeMirror.fromTextArea(document.getElementById("code"), {
+        lineNumbers: true,
+        mode: "text/x-haskell",
+        keyMap: "emacs"
+      });
+      editor.setOption('readOnly', true);
+
+      ws.onopen = function () {
+        // ws.send('/join alex'); // Send the message 'Ping' to the server
+        connected = true;
+        editor.setOption('readOnly', false);
+      };
+
+      editor.on('change',
+         function (editor, change) {
+          var secs = (new Date().getTime()) / 1000.0;
+          console.log("change: " + secs + " from: " + change.from + " to: " + change.to);
+          change.when = secs;
+          changes.push(change);
+          ws.send("/change " + secs);
+          // return false so codemirror handles the event
+          return(false);
+        }
+      );
+      editor.setOption("extraKeys", {
+        "Ctrl-1": function(cm) {
+           ws.send("/eval silence");
+        },
+        "Ctrl-2": function(cm) {
+           ws.send("/panic");
+        },
+        "Ctrl-Enter": function(cm) {
+          var selection;
+
+          if (!connected) {
+             return(false);
+          }
+
+          if (cm.somethingSelected()) {
+            selection = cm.getSelection();
+          }
+          else {
+            var pos = cm.getCursor();
+            var nonempty = /\S/;
+            selection = cm.getLine(pos.line);
+            if (nonempty.test(selection)) {
+              var above = pos.line - 1;
+              // todo check for non-whitespace
+              while (above >= 0 && nonempty.test(cm.getLine(above))) {
+                selection = cm.getLine(above) + "\n" + selection;
+                above--;
+              }
+              var below = pos.line + 1;
+              while (below < cm.lineCount() && nonempty.test(cm.getLine(below))) {
+                selection = selection + "\n" + cm.getLine(below);
+                below++;
+              }
+              var c = cm.getCursor();
+
+              // highlight evaluated area
+              // make editor temporarily read only so that the selection doesn't get 
+              // overwritten by fast typing..
+              cm.setOption('readOnly', true);
+              cm.setSelection({line: above+1, ch: 0}, {line: below, ch:0});
+              setTimeout(function(){cm.setCursor(c);cm.setOption('readOnly', false);},100);
+            }
+          }
+          console.log("eval: " + selection);
+          ws.send("/eval " + selection);
+          // var spaces = Array(cm.getOption("indentUnit") + 1).join(" ");
+          // cm.replaceSelection(spaces);
+        }
+      });
+
+    </script>
+</body>
+</html>

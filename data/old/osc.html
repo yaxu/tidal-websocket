@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8"/>
+
+<html>
+<head>
+<script src="osc-browser.js"></script>
+</head>
+<body>
+osc test
+    <script>
+      var changes = [];
+      var oscPort = new osc.WebSocketPort({
+            url: "ws://localhost:9160" // URL to your Web Socket server.
+      });
+      oscPort.on("error", function (error) {
+        console.log("An error occurred: ", error.message);
+      });
+      var rv = oscPort.send({
+           address: "/hello",
+           args: 0.5
+      });
+      alert("sent: " + rv);
+   </script>
+</body>
+</html>
