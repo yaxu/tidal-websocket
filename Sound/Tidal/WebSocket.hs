@@ -11,6 +11,7 @@ import Data.List
 import Data.Ratio
 import Data.Maybe
 import Control.Concurrent
+import System.Cmd
 
 import Sound.Tidal.Hint
 import Control.Concurrent.MVar
@@ -96,7 +97,9 @@ act state@(cid,d,mPatterns,(mIn,mOut)) conn request
   do putStrLn (show request)
      swapMVar mPatterns []
      d $ Tidal.silence
-     
+  | isPrefixOf "/shutdown" request =
+  do rawSystem "sudo" ["halt"]     
+     return ()
 
 act _ _ _ = return ()
 
