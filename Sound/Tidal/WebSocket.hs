@@ -15,17 +15,25 @@ import Control.Concurrent
 import Sound.Tidal.Hint
 import Control.Concurrent.MVar
 
-type TidalState = (Int, Tidal.ParamPattern -> IO(), MVar [(Int, Tidal.ParamPattern)])
+type TidalState = (Int,
+                   Tidal.ParamPattern -> IO(),
+                   MVar [(Int, Tidal.ParamPattern)],
+                   (MVar String, MVar Response)
+                  )
 
 port = 9162
 
-main = do
+run = do
   putStrLn $ "TidalCycles websocket server, starting on port " ++ show port
   mPatterns <- newMVar []
   mConnectionId <- newMVar 0
   -- (cps, getNow) <- Tidal.bpsUtils
   -- (d,_) <- Tidal.superDirtSetters getNow
   d <- Tidal.dirtStream
+  mIn <- newEmptyMVar
+  mOut <- newEmptyMVar
+  forkIO $ hintJob (mIn, mOut)
+  -- d $ Tidal.sound $ Tidal.p "bd sn"
   WS.runServer "0.0.0.0" port $ (\pending -> do
     conn <- WS.acceptRequest pending
     putStrLn $  "received new connection"
@@ -41,8 +49,9 @@ main = do
     putMVar mPatterns ((cid, Tidal.silence):pats)
     
     WS.forkPingThread conn 30
-    loop (cid, d, mPatterns) conn
+    loop (cid, d, mPatterns, (mIn, mOut)) conn
     )
+  putStrLn "done."
 
 loop :: TidalState -> WS.Connection -> IO ()
 loop state conn = do
@@ -58,7 +67,7 @@ loop state conn = do
     Left (WS.ParseException e) -> close state ("parse exception: " ++ e)
 
 close :: TidalState -> String -> IO ()
-close (cid,d,mPatterns) msg = do
+close (cid,d,mPatterns,_) msg = do
   pats <- takeMVar mPatterns
   let pats' = filter ((/= cid) . fst) pats
       ps = map snd pats'
@@ -70,11 +79,12 @@ close (cid,d,mPatterns) msg = do
 -- hush = mapM_ ($ Tidal.silence)
 
 act :: TidalState -> WS.Connection -> String -> IO ()
-act state@(cid,d,mPatterns) conn request
+act state@(cid,d,mPatterns,(mIn,mOut)) conn request
   | isPrefixOf "/eval " request =
   do putStrLn (show request)
      let code = fromJust $ stripPrefix "/eval " request
-     r <- runJob code
+     putMVar mIn code
+     r <- takeMVar mOut
      case r of OK p -> do WS.sendTextData conn (T.pack "good.")
                           putStrLn "updating"
                           updatePat state (conn, p)
@@ -91,14 +101,11 @@ act state@(cid,d,mPatterns) conn request
 act _ _ _ = return ()
 
 updatePat :: TidalState -> (WS.Connection, Tidal.ParamPattern) -> IO ()
-updatePat (cid, d, mPatterns) (conn, p) =
+updatePat (cid, d, mPatterns,_) (conn, p) =
   do pats <- takeMVar mPatterns
-     putStrLn $ show $ length pats
      let pats' = ((cid,p) : filter ((/= cid) . fst) pats)
          ps = map snd pats'
-     putStrLn "right then."
-     putStrLn $ show $ length pats'
-     putStrLn $ show ps
+     -- putStrLn $ show ps
      putMVar mPatterns pats'
      d $ Tidal.stack ps
      return ()
