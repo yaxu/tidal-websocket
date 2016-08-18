@@ -13,6 +13,19 @@
 <body>
 Live Coding Device v0.001 <br />
 <br />
-<button onclick="window.open('edit.html','window','toolbar=no, menubar=no, resizable=yes');">launch editor</button>
+    <script>
+      var connected = false;
+      var changes = [];
+      var ws = new WebSocket('ws://lcd.local:9162', ['soap']);
+      ws.onmessage = function (e) { console.log("msg: " + e.data) };
+      ws.onerror = function (error) { console.log("ws error" + error) };
+      function shutdownLCD() {
+        if (confirm("sure?")) {
+          ws.send("/shutdown");
+        }
+      }
+</script>
+<button onclick="window.open('edit.html','_blank','toolbar=no, menubar=no, resizable=yes');">launch editor</button> <br />
+<button onclick="shutdownLCD()">shutdown</button>
 </body>
 </html>

@@ -8,8 +8,10 @@
 <style>
   body {
     /* background-color:  #002b36; */
-    background-color:  #2f1e2e;
-}
+    background-color:  #000;
+  }
+  #code {
+  }
 </style>
 
 <script src="lib/codemirror.js"></script>
@@ -23,9 +25,11 @@
 <script src="mode/haskell/haskell.js"></script>
 <script src="osc-browser.js"></script>
 <html>
-<body>
-
-<form><textarea id="code" name="code">
+  <body>
+    <table>
+      <tr>
+<td width="80px" valign="top"><img src="cc-800.png" width="80px"/><br />
+<td width="800px"><form><textarea id="code" name="code" cols="80">
 </textarea></form>
 
     <script>
@@ -46,7 +50,7 @@
         keyMap: "emacs"
       });
       editor.setOption('readOnly', true);
-      editor.setOption('theme', "paraiso-dark");
+      editor.setOption('theme', "solarized dark");
 
       ws.onopen = function () {
         // ws.send('/join alex'); // Send the message 'Ping' to the server
@@ -115,6 +119,7 @@
         }
       });
 
-    </script>
+			     </script>
+    </td></tr></table>
 </body>
 </html>
