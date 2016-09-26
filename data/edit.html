@@ -1,9 +1,13 @@
 <!doctype html>
-<meta charset="utf-8"/>
+<meta charset="utf-8" />
 
+<html lang="en">
+
+<head>
 <link rel="stylesheet" href="lib/codemirror.css">
 <link rel="stylesheet" href="css/paraiso-dark.css">
 <link rel="stylesheet" href="css/spicule.css">
+<link rel="stylesheet" href="lib/jquery-ui-1.12.1/jquery-ui.css">
 
 <style>
   body {
@@ -12,8 +16,13 @@
   }
   #code {
   }
+  #dummycode {
+    display: none;
+  }
 </style>
 
+<script src="lib/jquery-3.1.1.min.js"></script>
+<script src="lib/jquery-ui-1.12.1/jquery-ui.js"></script>
 <script src="lib/codemirror.js"></script>
 <script src="lib/emacs.js"></script>
 <script src="lib/matchbrackets.js"></script>
@@ -24,17 +33,36 @@
 <script src="lib/haskell.js"></script>
 <script src="lib/osc-browser.js"></script>
 
-<html>
-  <body>
-    <table>
-      <tr>
-<td width="80px" valign="top"><img src="images/cc-800.png" width="80px"/><br />
-<td width="800px"><form><textarea id="code" name="code" cols="80">
-</textarea></form>
-
-    <script>
+<script>
+  var editor, dummyEditor;
+  $( function() {
       var connected = false;
-      var changes = [];
+      // list of list of changes
+      var changeList = [];
+      var recordChanges= true;
+  
+      $("#slider").slider({
+        start: function(event, ui) {
+          $("#codediv").hide();
+          $("#dummycodediv").show();
+        },
+        stop: function(event, ui) {
+          $("#codediv").show();
+          $("#dummycodediv").hide();
+        },
+        slide: function(event, ui) {
+          var pc = ui.value / 100.0;
+          var changeN = Math.floor(pc * changeList.length);
+
+          dummyEditor.setValue("");
+          if (changeN > 0) {
+            for (i=0; i < changeN; ++i) {
+              var change = changeList[i];
+              dummyEditor.replaceRange(change.text, change.from, change.to);
+            }
+	  }
+        }
+      });
       var ws = new WebSocket('ws://localhost:9162', ['soap']);
       ws.onmessage = function (e) { console.log("msg: " + e.data) };
       ws.onerror = function (error) { console.log("ws error" + error) };
@@ -44,14 +72,18 @@
         elt.style.background = "#def";
         setTimeout(function() { elt.style.background = ""; }, 300);
       };
-      var editor = CodeMirror.fromTextArea(document.getElementById("code"), {
+      var editorOptions = {
         lineNumbers: true,
         mode: "text/x-haskell",
         keyMap: "emacs"
-      });
+      };
+      editor = CodeMirror.fromTextArea(document.getElementById("code"), editorOptions);
       editor.setOption('readOnly', true);
       editor.setOption('theme', "solarized dark");
-
+      dummyEditor = CodeMirror.fromTextArea(document.getElementById("dummycode"), editorOptions);
+      dummyEditor.setOption('readOnly', true);
+      dummyEditor.setOption('theme', "solarized dark");
+  
       ws.onopen = function () {
         // ws.send('/join alex'); // Send the message 'Ping' to the server
         connected = true;
@@ -61,10 +93,10 @@
       editor.on('change',
          function (editor, change) {
           var secs = (new Date().getTime()) / 1000.0;
-          console.log("change: " + secs + " from: " + change.from + " to: " + change.to);
+          console.log("change: " + secs + " obj: " + change + " of " + change.from.line);
           change.when = secs;
-          changes.push(change);
-          ws.send("/change " + secs);
+          changeList.push(change);
+          // ws.send("/change " + secs);
           // return false so codemirror handles the event
           return(false);
         }
@@ -118,8 +150,26 @@
           // cm.replaceSelection(spaces);
         }
       });
+  });
 
-			     </script>
+  </script>
+</head>  
+
+<body>
+    <div id="slider"></div>
+    <table>
+      <tr>
+<td width="80px" valign="top"><img src="images/cc-800.png" width="80px"/><br />
+<td width="800px"><form>
+    <div id="codediv">
+    <textarea id="code" name="code" cols="80">
+    </textarea>
+    </div>
+    <div id="dummycodediv">
+      <textarea id="dummycode" name="dummycode" cols="80">
+      </textarea>
+    </div>
+ </form>
     </td></tr></table>
 </body>
 </html>
