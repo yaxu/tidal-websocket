@@ -34,7 +34,6 @@ run = do
   mIn <- newEmptyMVar
   mOut <- newEmptyMVar
   forkIO $ hintJob (mIn, mOut)
-  -- d $ Tidal.sound $ Tidal.p "bd sn"
   WS.runServer "0.0.0.0" port $ (\pending -> do
     conn <- WS.acceptRequest pending
     putStrLn $  "received new connection"
@@ -75,7 +74,6 @@ close (cid,d,mPatterns,_) msg = do
   putMVar mPatterns pats'
   d $ Tidal.stack ps
   putStrLn ("connection closed: " ++ msg)
-  -- hush dss
 
 -- hush = mapM_ ($ Tidal.silence)
 
@@ -86,12 +84,10 @@ act state@(cid,d,mPatterns,(mIn,mOut)) conn request
      let code = fromJust $ stripPrefix "/eval " request
      putMVar mIn code
      r <- takeMVar mOut
-     case r of OK p -> do WS.sendTextData conn (T.pack "good.")
-                          putStrLn "updating"
+     case r of OK p -> do putStrLn "updating"
                           updatePat state (conn, p)
                           putStrLn "updated"
-                          WS.sendTextData conn (T.pack "looping..")
-               Error s -> WS.sendTextData conn (T.pack $ "bad: " ++ s)
+               Error s -> WS.sendTextData conn (T.pack $ "error: " ++ s)
      return ()
   | isPrefixOf "/panic" request =
   do putStrLn (show request)
@@ -113,23 +109,3 @@ updatePat (cid, d, mPatterns,_) (conn, p) =
      d $ Tidal.stack ps
      return ()
      
-{-
-processRequest (_,dss) (Pattern n p) = do
-  x <- hintParamPattern p
-  case x of (Left error) -> do
-              putStrLn "Error interpreting pattern"
-              return Nothing
-            (Right paramPattern) -> do
-              dss!!(n-1) $ paramPattern
-              return Nothing
-
-processRequest _ (Render patt cps cycles) = do
-  x <- hintParamPattern patt
-  case x of (Left error) -> do
-              putStrLn "Error interpreting pattern"
-              return Nothing
-            (Right paramPattern) -> do
-              let r = render paramPattern cps cycles
-              putStrLn (encodeStrict r)
-              return (Just (showJSON r))
--}

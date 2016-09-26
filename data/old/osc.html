@@ -15,11 +15,10 @@ osc test
       oscPort.on("error", function (error) {
         console.log("An error occurred: ", error.message);
       });
-      var rv = oscPort.send({
-           address: "/hello",
-           args: 0.5
+      oscPort.open();
+      oscPort.on("ready", function() {
+        oscPort.send({address: "/hello", args: [100]});
       });
-      alert("sent: " + rv);
    </script>
 </body>
 </html>
