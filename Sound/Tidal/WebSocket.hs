@@ -74,6 +74,7 @@ run = do
   (cps, nudger, getNow, mTempo) <- cpsUtils''
   -- hack - give clock server time to warm up before connecting to it
   threadDelay 500000
+  cps 0.85
   (d,_) <- Tidal.dirtSetters getNow
   -- d <- Tidal.dirtStream
   mIn <- newEmptyMVar
@@ -170,7 +171,7 @@ act state@(cxid,_,sender,d,mPatterns,(mIn,mOut),sql,mTempo,nudger) conn request
       do S.execute sql "INSERT INTO change (cxid,json) VALUES (?,?)" (ChangeField cxid (T.pack $ fromJust $ stripPrefix "/change " request))
          return ()
   | isPrefixOf "/pulse " request =
-    do let diff = (read $ takeWhile ((flip elem) ("01234567890." :: String)) $ fromJust $ stripPrefix "/pulse " request) :: Double
+    do let diff = (read $ takeWhile ((flip elem) ("-01234567890." :: String)) $ fromJust $ stripPrefix "/pulse " request) :: Double
        t <- readMVar mTempo
        -- seconds per cycle
        let spc = 1 / (Tidal.cps t)
