@@ -4,7 +4,7 @@
 <html lang="en">
 
 <head>
-<link rel="stylesheet" href="lib/codemirror.css">
+<link rel="stylesheet" href="codemirror-5.21.0/lib/codemirror.css">
 <link rel="stylesheet" href="css/paraiso-dark.css">
 <link rel="stylesheet" href="css/spicule.css">
 <link rel="stylesheet" href="lib/jquery-ui-1.12.1/jquery-ui.css">
@@ -29,18 +29,34 @@ div#pulse {
     background: #888;
 }
 
+.CodeMirror {
+  border: 1px solid #eee;
+  height: auto;
+}
+
+div#errorbox {
+    color: #ffffff;
+    font-family: Inconsolata, monospace;
+    display: block;
+    white-space: pre;
+    margin: 1em 0;
+}
+
+td {
+}
+
 </style>
 
 <script src="lib/jquery-3.1.1.min.js"></script>
 <script src="lib/jquery-ui-1.12.1/jquery-ui.js"></script>
-<script src="lib/codemirror.js"></script>
-<script src="lib/emacs.js"></script>
-<script src="lib/matchbrackets.js"></script>
-<script src="lib/comment.js"></script>
-<script src="lib/dialog.js"></script>
-<script src="lib/searchcursor.js"></script>
-<!-- <script src="lib/search.js"></script> -->
-<script src="lib/haskell.js"></script>
+<script src="codemirror-5.21.0/lib/codemirror.js"></script>
+<script src="codemirror-5.21.0/keymap/emacs.js"></script>
+<script src="codemirror-5.21.0/addon/edit/matchbrackets.js"></script>
+<script src="codemirror-5.21.0/addon/comment/continuecomment.js"></script>
+<script src="codemirror-5.21.0/addon/dialog/dialog.js"></script>
+<script src="codemirror-5.21.0/addon/search/searchcursor.js"></script>
+<!-- <script src="codemirror-5.21.0/addon/search/search.js"></script> -->
+<script src="codemirror-5.21.0/mode/haskell/haskell.js"></script>
 <script src="lib/osc-browser.js"></script>
 
 <script>
@@ -51,7 +67,25 @@ var changeList = []
 var evalList = []
 var snapshotInterval = 32
 var playback = false
-var lastTick = -1
+
+var saveData = function (data, fileName) {
+    var json = JSON.stringify(data),
+        blob = new Blob([json], {type: "octet/stream"}),
+        url = window.URL.createObjectURL(blob);
+    a = $("#dummylink")[0];
+    //console.log("url: " + a.href + " data: " + data)
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    window.URL.revokeObjectURL(url);
+};
+
+var saveState = function () {
+    console.log("save state");
+    saveData([evalList,changeList], "edits.json");
+    console.log("saved state");
+    return(false)
+}
 
 $( function() {
     var connected = false
@@ -66,14 +100,13 @@ $( function() {
 
     var getLastEvalN = function(when) {
 	var lastEvalN = -1;
-	console.log("evalList length: " + evalList.length)
+	// console.log("evalList length: " + evalList.length)
     	for (i=0; i < evalList.length; ++i) {
 	    var e = evalList[i]
-	    console.log("compare eval @" + e.when + " with " + when)
+	    // console.log("compare eval @" + e.when + " with " + when)
 	    if (e.when >= when) {
 		break
 	    }
-	    console.log("maybe " + e.code)
 	    lastEvalN = i
 	}
 	return(lastEvalN)
@@ -108,48 +141,96 @@ $( function() {
 	history(changeN)
     }
 
+    var evalFromCursor = function(cm) {
+        var selection;
+	
+        if (!connected) {
+	    return(false);
+        }
+	
+        if (cm.somethingSelected()) {
+	    selection = cm.getSelection();
+        }
+        else {
+	    var pos = cm.getCursor();
+	    var nonempty = /\S/;
+	    selection = cm.getLine(pos.line);
+	    if (nonempty.test(selection)) {
+		var above = pos.line - 1;
+		// todo check for non-whitespace
+		while (above >= 0 && nonempty.test(cm.getLine(above))) {
+		    selection = cm.getLine(above) + "\n" + selection;
+		    above--;
+		}
+		var below = pos.line + 1;
+		while (below < cm.lineCount() && nonempty.test(cm.getLine(below))) {
+		    selection = selection + "\n" + cm.getLine(below);
+		    below++;
+		}
+		var c = cm.getCursor();
+		
+		// highlight evaluated area
+		// make editor temporarily read only so that the
+		// selection doesn't get overwritten by fast
+		// typing..
+		cm.setOption('readOnly', true);
+		cm.setSelection({line: above+1, ch: 0}, {line: below, ch:0});
+		setTimeout(function(){cm.setCursor(c);cm.setOption('readOnly', false);},100);
+	    }
+        }
+	tidal(selection);
+        // var spaces = Array(cm.getOption("indentUnit") + 1).join(" ");
+        // cm.replaceSelection(spaces);
+	return(selection)
+    }
+    
     var playbackEvent = function() {
 	if (!playback) {
 	    return(false)
 	}
 	var now = (new Date().getTime()) / 1000.0
-	history(playback.n);
-	console.log("playback n: " + playback.n)
-	playback.n++
-	if (playback.n >= changeList.length) {
+	if (playback.n > changeList.length) {
 	    playback = false
-            $("#codediv").show()
-            $("#dummycodediv").hide()
+            $("#codediv").show();
+            $("#dummycodediv").hide();
 	}
 	else {
-	    var change = changeList[playback.n]
-	    var lastEvalN = getLastEvalN(change.when)
-	    if (changeList.length > playback.n) {
-		var nextTime = changeList[playback.n + 1].when + playback.offset
-		delay = nextTime - now
+	    var nextChange = changeList[playback.n]
+	    var lastEvalN = getLastEvalN(nextChange.when)
+	    var nextTime = nextChange.when + playback.offset
+	    var codepos
+	    var code
+	    delay = nextTime - now
 
-		if (lastEvalN > playback.lastEvalN) {
-		    e = evalList[lastEvalN]
-		    playback.lastEvalN = lastEvalN
-		    tidal(e.code)
-		}
-		
-		/*
-		  console.log("> change: " + change)
-		  console.log("> nextTime: " + nextTime)
-		  console.log("> now " + now)
-		  console.log("> when: " + change.when)
-		  console.log("> delay " + delay)
-		*/
-		if (delay <= 0) {
-		    playbackEvent()
-		}
-		else {
-		    console.log("delay: " + delay)
-		    setTimeout(function () {playbackEvent()}, delay*1000.0)
-		}
+	    if (lastEvalN > playback.lastEvalN) {
+		e = evalList[lastEvalN]
+		playback.lastEvalN = lastEvalN
+		codepos = e.pos
+		code = e.code
+		console.log("got codepos " + codepos.line + "x" + codepos.ch)
 	    }
+	    
+	    /*
+	    console.log("> change: " + nextChange)
+	    console.log("> nextTime: " + nextTime)
+	    console.log("> now " + now)
+	    console.log("> when: " + nextChange.when)
+	    console.log("> delay " + delay)
+	    */
+	    console.log("delay: " + delay)
+	    if (code) {
+		//editor.setCursor(codepos)
+		tidal(code)
+		//evalFromCursor(editor)
+	    }
+	    setTimeout(
+		function () {
+		    history(playback.n);
+		    playbackEvent()
+		}, delay*1000.0
+	    )
 	}
+	playback.n++
     }
 
     startPlayback = function() {
@@ -180,15 +261,18 @@ $( function() {
         $("#stopbtn").hide()
     }
 
-    pulseClick = function() {
-	if (lastTick > 0) {
-  	    diff = ((new Date().getTime()) / 1000.0) - lastTick
-	    msg = "/pulse " + diff
-	    console.log(msg)
-	    ws.send(msg)
-	}
+    faster = function() {
+        console.log("faster")
+        msg = "/faster"
+        ws.send(msg)
     }
-    
+
+    slower = function() {
+        console.log("slower")
+        msg = "/slower"
+        ws.send(msg)
+    }
+
     $("#slider").slider({
         value: 100,  
         start: function(event, ui) {
@@ -217,53 +301,52 @@ $( function() {
             var pc = ui.value / 100.0
 	    historyPercent(pc)
         }
-    })
-    var ws = new WebSocket('ws://localhost:9162', [])
+    });
+    var ws = new WebSocket('ws://localhost:9162', []);
     ws.onmessage = function (e) {
-	var re = /\/(\w+) ((.|\n)*)/
-	var m = e.data.match(re)
-	var ok = false
+        var re = /\/(\w+) ((.|[\r\n])*)/
+	var m = e.data.match(re);
+	var ok = false;
 	if (m) {
-	    var status = m[1]
+	    var status = m[1];
 	    var data = m[2]
-	    /* console.log("msg: " + e.data)
-	       console.log("status: " + status)
-	       console.log("data: " + data) */
-	    if (status == 'eval') {
-		var re2 = /([\d\.]+) ((.|\n)*)/
-		var m2 = data.match(re2)
-		var when = parseFloat(m2[1])
-		var code = m2[2]
-		var eval = {}
-		eval.when = when
-		eval.code = code
-		evalList.push(eval)
-		console.log("Evaluated " + eval.code)
-		ok = true
-	    }
-	    else if (status == 'bang') {
-		var tick = parseInt(data)
-		if (tick % 4 == 0) {
-		    lastTick = (new Date().getTime()) / 1000.0
-		    console.log("bang " + tick)
-		    $("#pulse").css("background", "#fff")
-		}
-		else if (tick % 4 == 1) {
-		    $("#pulse").css("background", "#ddd")
-		}
-		else if (tick % 4 == 2) {
-		    $("#pulse").css("background", "#aaa")
-		}
-		else {
-		    $("#pulse").css("background", "#777")
-		}
-		ok = true
-	    }
+	    var code = m[3];
+            if (status == 'eval') {
+                var re2 = /([\d\.]+) ((.|\n)*)/
+                var m2 = data.match(re2)
+                var when = parseFloat(m2[1])
+                var code = m2[2]
+                console.log("Evaluated " + eval.code)
+		$('div#errorbox').text("")
+                ok = true
+            }
+            else if (status == 'bang') {
+                var tick = parseInt(data)
+                if (tick % 4 == 0) {
+                    lastTick = (new Date().getTime()) / 1000.0
+                    //console.log("bang " + tick)
+                    $("#pulse").css("background", "#fff")
+                }
+                else if (tick % 4 == 1) {
+                    $("#pulse").css("background", "#ccc")
+                }
+                else if (tick % 4 == 2) {
+                    $("#pulse").css("background", "#bbb")
+                }
+                else {
+                    $("#pulse").css("background", "#aaa")
+                }
+                ok = true
+            }
+            else if (status == 'error') {
+		$('div#errorbox').text(data)
+                ok = true
+            }
 	}
 	if (!ok) {
 	    console.log("msg: " + e.data)
 	}
-    }
+    };
     ws.onerror = function (error) { console.log("ws error" + error) };
     
     CodeMirror.commands.save = function() {
@@ -274,7 +357,7 @@ $( function() {
     var editorOptions = {
         lineNumbers: true,
         mode: "text/x-haskell",
-        keyMap: "emacs"
+	saveFunction: saveState, // not working..
     };
     editor = CodeMirror.fromTextArea(document.getElementById("code"), editorOptions);
     editor.setOption('readOnly', true);
@@ -298,7 +381,7 @@ $( function() {
 		  var changeCount = changeList.length;
 		  if (changeCount % snapshotInterval == 0) {
 		      change.snapshot = editor.getValue();
-		      console.log("snap");
+		      //console.log("snap");
 		  }
 		  
 		  changeList.push(change);
@@ -315,52 +398,23 @@ $( function() {
 	     );
     editor.setOption("extraKeys", {
         "Ctrl-.": function(cm) {
-	    tidal("silence");
+	    tidal("silence")
         },
         "Ctrl-0": function(cm) {
-            ws.send("/panic");
+            ws.send("/panic")
+        },
+        "Ctrl-s": function(cm) {
+            saveState()
         },
         "Ctrl-Enter": function(cm) {
-            var selection;
-	    
-            if (!connected) {
-		return(false);
-            }
-	    
-            if (cm.somethingSelected()) {
-		selection = cm.getSelection();
-            }
-            else {
-		var pos = cm.getCursor();
-		var nonempty = /\S/;
-		selection = cm.getLine(pos.line);
-		if (nonempty.test(selection)) {
-		    var above = pos.line - 1;
-		    // todo check for non-whitespace
-		    while (above >= 0 && nonempty.test(cm.getLine(above))) {
-			selection = cm.getLine(above) + "\n" + selection;
-			above--;
-		    }
-		    var below = pos.line + 1;
-		    while (below < cm.lineCount() && nonempty.test(cm.getLine(below))) {
-			selection = selection + "\n" + cm.getLine(below);
-			below++;
-		    }
-		    var c = cm.getCursor();
-		    
-		    // highlight evaluated area
-		    // make editor temporarily read only so that the
-		    // selection doesn't get overwritten by fast
-		    // typing..
-		    cm.setOption('readOnly', true);
-		    cm.setSelection({line: above+1, ch: 0}, {line: below, ch:0});
-		    setTimeout(function(){cm.setCursor(c);cm.setOption('readOnly', false);},100);
-		}
-            }
-	    tidal(selection);
-            // var spaces = Array(cm.getOption("indentUnit") + 1).join(" ");
-            // cm.replaceSelection(spaces);
-        }
+	    var secs = (new Date().getTime()) / 1000.0;
+	    var eval = {}
+	    eval.when = secs
+	    eval.pos = cm.getCursor()
+	    eval.code = evalFromCursor(cm)
+	    evalList.push(eval)
+	    console.log("pushed " + eval)
+	}
     });
 
     $("#restorefile").change(function() {
@@ -388,24 +442,6 @@ $( function() {
 
 });
 
-var saveData = function (data, fileName) {
-    var json = JSON.stringify(data),
-        blob = new Blob([json], {type: "octet/stream"}),
-        url = window.URL.createObjectURL(blob);
-    a = $("#dummylink")[0];
-    //console.log("url: " + a.href + " data: " + data)
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    window.URL.revokeObjectURL(url);
-};
-
-var saveState = function () {
-    console.log("save state");
-    saveData([evalList,changeList], "edits.json");
-    console.log("saved state");
-    return(false)
-}
 
 /*
 var upload = function() {
@@ -418,28 +454,36 @@ var upload = function() {
 </head>  
 
 <body>
-    <div id="slider"></div>
     <table>
       <tr>
-    <td width="80px" valign="top"><img src="images/cc-800.png" width="80px"/><br />
-    <div id="pulse" onclick="pulseClick()"></div>
+<td width="80px" valign="top"><img src="images/cc-800.png" width="80px"/><br />
+
+    <div>
+    <a style="display:none" href="#dummy" id="dummylink">hideme</a>
+    <button name="Play" id="playbtn" onclick="startPlayback()" >&gt;</button>
+    <button name="Stop" id="stopbtn" onclick="stopPlayback()" style="display: none">()</button>
+    <button name="Save" onclick="saveState()" >v</button>
+    <button name="Load" id="loadbtn" onclick="$('#restorefile').show();$('#loadbtn').hide(); return(false)" >^</button>
+    <input type="file" name="File" id="restorefile" style="display: none">
+    </div>
+    <br />
+    <table style="color:#fff"><tr><td><span onclick="slower()">-</span></td><td><span onclick="pulseShift(-0.01)">&lt;</span></td><td><div id="pulse" onclick="pulseClick()"></div></td><td><span onclick="pulseShift(0.01)">&gt;</span></td><td><span onclick="faster()">+</span></td></tr></table>
+    <br />
+    <div id="slidecontainer" style="width:90%; margin-right:1em;"><div id="slider"></div></div>
+    </div>
     </td>
-<td width="800px"><form>
+    <td width="800px"><form>
     <div id="codediv">
     <textarea id="code" name="code" cols="80"></textarea>
     </div>
     <div id="dummycodediv">
       <textarea id="dummycode" name="dummycode" cols="80"></textarea>
     </div>
- </form>
+    </form>
+    <div id="errorbox">
+    </div>
+    <br /><br /><br /><br /><br /><br /><br /><br /><br />
     </td></tr></table>
-    <!-- <form class="upload" action="edit.html" method="POST" enctype="multipart/form-data">-->
-    <a style="display:none" href="#dummy" id="dummylink">hideme</a>
-    <button name="Play" id="playbtn" onclick="startPlayback()" >Play</button>
-    <button name="Stop" id="stopbtn" onclick="stopPlayback()" style="display: none">Stop</button>
-    <button name="Save" onclick="saveState()" >Save</button>
-    <button name="Load" id="loadbtn" onclick="$('#restorefile').show();$('#loadbtn').hide(); return(false)" >Load</button>
-      <input type="file" name="File" id="restorefile" style="display: none">
-    <!-- </form> -->
+    
 </body>
 </html>
