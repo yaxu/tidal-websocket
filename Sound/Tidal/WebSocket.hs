@@ -76,8 +76,8 @@ run = do
   -- hack - give clock server time to warm up before connecting to it
   threadDelay 500000
   -- (d,_) <- Tidal.dirtSetters getNow
-  (d,_) <- Tidal.superDirtSetters getNow
-  -- d <- Tidal.dirtStream
+  -- (d,_) <- Tidal.superDirtSetters getNow
+  d <- Tidal.dirtStream
   mIn <- newEmptyMVar
   mOut <- newEmptyMVar
   forkIO $ hintJob (mIn, mOut)
@@ -116,7 +116,6 @@ onTick sender tempo tick = do forkIO $ do (threadDelay $ floor ((Tidal.latency T
 
 loop :: TidalState -> WS.Connection -> IO ()
 loop state conn = do
-  putStrLn "loop"
   msg <- try (WS.receiveData conn)
   -- add to dictionary of connections -> patterns, could use a map for this
   case msg of
@@ -147,17 +146,16 @@ takeNumbers xs = (takeWhile f xs, dropWhile (== ' ') $ dropWhile f xs)
 act :: TidalState -> WS.Connection -> String -> IO ()
 act state@(cxid,_,sender,d,mPatterns,(mIn,mOut),sql,mTempo,nudger,cps) conn request
   | isPrefixOf "/eval " request =
-    do putStrLn (show request)
+    do 
        let (when, code) = takeNumbers $ fromJust $ stripPrefix "/eval " request
        putMVar mIn code
        r <- takeMVar mOut
-       case r of OK p -> do putStrLn "updating"
+       case r of OK p -> do 
                             updatePat state (conn, p)
                             t <- (round . (* 100)) `fmap` getPOSIXTime
                             let fn = "/home/alex/SparkleShare/embedded/print/" ++ show t
                             --drawText (fn ++ ".pdf") code (Tidal.dirtToColour p)
                             -- rawSystem "convert" [fn ++ ".pdf", fn ++ ".png"]
-                            putStrLn "updated"
                             sender $ "/eval " ++ when ++ " " ++ code
                  Error s -> sender $ "/error " ++ when ++ " " ++ s
        return ()
@@ -198,7 +196,7 @@ updatePat (cxid, _, _, d, mPatterns,_,_,_,_,_) (conn, p) =
   do pats <- takeMVar mPatterns
      let pats' = ((cxid,p) : filter ((/= cxid) . fst) pats)
          ps = map snd pats'
-     -- putStrLn $ show ps
+     -- putStrLn $ "updating pattern: " ++ show (Tidal.stack ps)
      putMVar mPatterns pats'
      d $ Tidal.stack ps
      return ()
