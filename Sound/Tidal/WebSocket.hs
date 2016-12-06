@@ -34,6 +34,7 @@ type TidalState = (Int,
                    (MVar String, MVar Response),
                    S.Connection,
                    MVar (Tidal.Tempo),
+                   Double -> IO (),
                    Double -> IO ()
                   )
 
@@ -74,9 +75,9 @@ run = do
   (cps, nudger, getNow, mTempo) <- cpsUtils''
   -- hack - give clock server time to warm up before connecting to it
   threadDelay 500000
-  cps 0.85
-  (d,_) <- Tidal.dirtSetters getNow
-  -- d <- Tidal.dirtStream
+  -- (d,_) <- Tidal.dirtSetters getNow
+  -- (d,_) <- Tidal.superDirtSetters getNow
+  d <- Tidal.dirtStream
   mIn <- newEmptyMVar
   mOut <- newEmptyMVar
   forkIO $ hintJob (mIn, mOut)
@@ -103,7 +104,7 @@ run = do
     
     WS.forkPingThread conn 30
     clockThreadId <- (forkIO $ Tidal.clockedTick 4 (onTick sender))
-    let state = (cxid, [senderThreadId,clockThreadId], sender, d, mPatterns, (mIn, mOut), sql, mTempo, nudger)
+    let state = (cxid, [senderThreadId,clockThreadId], sender, d, mPatterns, (mIn, mOut), sql, mTempo, nudger, cps)
     loop state conn
     )
   putStrLn "done."
@@ -115,7 +116,6 @@ onTick sender tempo tick = do forkIO $ do (threadDelay $ floor ((Tidal.latency T
 
 loop :: TidalState -> WS.Connection -> IO ()
 loop state conn = do
-  putStrLn "loop"
   msg <- try (WS.receiveData conn)
   -- add to dictionary of connections -> patterns, could use a map for this
   case msg of
@@ -127,7 +127,7 @@ loop state conn = do
     Left (WS.ParseException e) -> close state ("parse exception: " ++ e)
 
 close :: TidalState -> String -> IO ()
-close (cxid,threadIds,_,d,mPatterns,_,_,_,_) msg = do
+close (cxid,threadIds,_,d,mPatterns,_,_,_,_,_) msg = do
   pats <- takeMVar mPatterns
   let pats' = filter ((/= cxid) . fst) pats
       ps = map snd pats'
@@ -144,19 +144,18 @@ takeNumbers xs = (takeWhile f xs, dropWhile (== ' ') $ dropWhile f xs)
   where f x = not . null $ filter (x ==) "0123456789."
 
 act :: TidalState -> WS.Connection -> String -> IO ()
-act state@(cxid,_,sender,d,mPatterns,(mIn,mOut),sql,mTempo,nudger) conn request
+act state@(cxid,_,sender,d,mPatterns,(mIn,mOut),sql,mTempo,nudger,cps) conn request
   | isPrefixOf "/eval " request =
-    do putStrLn (show request)
+    do 
        let (when, code) = takeNumbers $ fromJust $ stripPrefix "/eval " request
        putMVar mIn code
        r <- takeMVar mOut
-       case r of OK p -> do putStrLn "updating"
+       case r of OK p -> do 
                             updatePat state (conn, p)
                             t <- (round . (* 100)) `fmap` getPOSIXTime
                             let fn = "/home/alex/SparkleShare/embedded/print/" ++ show t
                             --drawText (fn ++ ".pdf") code (Tidal.dirtToColour p)
                             -- rawSystem "convert" [fn ++ ".pdf", fn ++ ".png"]
-                            putStrLn "updated"
                             sender $ "/eval " ++ when ++ " " ++ code
                  Error s -> sender $ "/error " ++ when ++ " " ++ s
        return ()
@@ -179,17 +178,25 @@ act state@(cxid,_,sender,d,mPatterns,(mIn,mOut),sql,mTempo,nudger) conn request
                  | diff < (0-(spc/2)) = diff + spc
                  | otherwise = diff
        putStrLn $ "nudging: " ++ show diff' ++ " (not " ++ show diff ++ ")"
-       nudger diff'
+       nudger (diff' + (Tidal.latency Tidal.dirt))
+       return ()
+  | isPrefixOf "/faster" request =    
+    do t <- readMVar mTempo
+       cps $ (Tidal.cps t) + 0.01
+       return ()
+  | isPrefixOf "/slower" request =    
+    do t <- readMVar mTempo
+       cps $ (Tidal.cps t) - 0.01
        return ()
 
 act _ _ _ = return ()
 
 updatePat :: TidalState -> (WS.Connection, Tidal.ParamPattern) -> IO ()
-updatePat (cxid, _, _, d, mPatterns,_,_,_,_) (conn, p) =
+updatePat (cxid, _, _, d, mPatterns,_,_,_,_,_) (conn, p) =
   do pats <- takeMVar mPatterns
      let pats' = ((cxid,p) : filter ((/= cxid) . fst) pats)
          ps = map snd pats'
-     -- putStrLn $ show ps
+     -- putStrLn $ "updating pattern: " ++ show (Tidal.stack ps)
      putMVar mPatterns pats'
      d $ Tidal.stack ps
      return ()
