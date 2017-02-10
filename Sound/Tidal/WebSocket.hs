@@ -169,7 +169,7 @@ act state@(cxid,_,sender,d,mPatterns,(mIn,mOut),sql,mTempo,nudger,cps) conn requ
   | isPrefixOf "/change " request =
       do S.execute sql "INSERT INTO change (cxid,json) VALUES (?,?)" (ChangeField cxid (T.pack $ fromJust $ stripPrefix "/change " request))
          return ()
-  | isPrefixOf "/pulse " request =
+  | isPrefixOf "/nudge " request =
     do let diff = (read $ takeWhile ((flip elem) ("-01234567890." :: String)) $ fromJust $ stripPrefix "/pulse " request) :: Double
        t <- readMVar mTempo
        -- seconds per cycle
