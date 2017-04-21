@@ -27,7 +27,7 @@ import qualified Database.SQLite.Simple as S
 import qualified Database.SQLite.Simple.FromRow as SFR
 
 data TidalState = TidalState {cxid :: Int,
-                              clients :: [ThreadId],
+                              serverThread :: ThreadId,
                               sender :: String -> IO (),
                               dirt :: Tidal.ParamPattern -> IO(),
                               mPatterns :: MVar [(Int, Tidal.ParamPattern)],
@@ -36,7 +36,8 @@ data TidalState = TidalState {cxid :: Int,
                               sql :: S.Connection,
                               mTempo :: MVar (Tidal.Tempo),
                               nudger :: Double -> IO (),
-                              cps :: Double -> IO ()
+                              cps :: Double -> IO (),
+                              clockThread :: Maybe ThreadId
                              }
 
 data ChangeField = ChangeField Int T.Text deriving (Show)
@@ -112,8 +113,7 @@ run = do
     putMVar mPatterns ((cxid, Tidal.silence):pats)
     
     WS.forkPingThread conn 30
-    clockThreadId <- (forkIO $ Tidal.clockedTick 4 (onTick sender))
-    let state = TidalState cxid [senderThreadId,clockThreadId] sender d mPatterns mIn mOut sql mTempo nudger cps
+    let state = TidalState cxid senderThreadId sender d mPatterns mIn mOut sql mTempo nudger cps Nothing
     loop state conn
     )
   putStrLn "done."
@@ -129,8 +129,8 @@ loop state conn = do
   -- add to dictionary of connections -> patterns, could use a map for this
   case msg of
     Right s -> do
-      act state conn (T.unpack s)
-      loop state conn
+      state' <- act state conn (T.unpack s)
+      loop state' conn
     Left WS.ConnectionClosed -> close state "unexpected loss of connection"
     Left (WS.CloseRequest _ _) -> close state "by request from peer"
     Left (WS.ParseException e) -> close state ("parse exception: " ++ e)
@@ -142,9 +142,9 @@ close ts msg = do
       ps = map snd pats'
   putMVar (mPatterns ts) pats'
   dirt ts $ Tidal.stack ps
-  mapM_ killThread (clients ts)
+  killThread (serverThread ts)
+  maybe (return ()) killThread (clockThread ts)
   putStrLn ("connection closed: " ++ msg)
-
 -- hush = mapM_ ($ Tidal.silence)
 
 -- TODO: proper parsing..
@@ -153,7 +153,9 @@ takeNumbers xs = (takeWhile f xs, dropWhile (== ' ') $ dropWhile f xs)
   where f x = not . null $ filter (x ==) "0123456789."
 
 commands = [("play", act_play) ,
-            ("panic", act_panic) {-,
+            ("panic", act_panic),
+            ("wantbang", act_wantbang)
+            {-,
             ("shutdown", act_shutdown),
             ("change", act_change),
             ("nudge", act_nudge),
@@ -163,7 +165,7 @@ commands = [("play", act_play) ,
             ("nobang", act_bang False)-}
            ]
 
-getCommand :: String -> Maybe (TidalState -> WS.Connection -> IO ())
+getCommand :: String -> Maybe (TidalState -> WS.Connection -> IO (TidalState))
 getCommand ('/':s) = do f <- lookup command commands
                         param <- stripPrefix command s
                         let param' = dropWhile (== ' ') param
@@ -171,13 +173,14 @@ getCommand ('/':s) = do f <- lookup command commands
   where command = takeWhile (/= ' ') s
 getCommand _ = Nothing
 
-act :: TidalState -> WS.Connection -> String -> IO ()
+act :: TidalState -> WS.Connection -> String -> IO (TidalState)
 --act state@(cxid,_,sender,d,mPatterns,(mIn,mOut),sql,mTempo,nudger,cps) conn request
 act ts conn request = (fromMaybe act_no_parse $ getCommand request) ts conn
 
-act_no_parse ts conn = sender ts $ "/noparse"
+act_no_parse ts conn = do sender ts $ "/noparse"
+                          return ts
 
-act_play :: String -> TidalState -> WS.Connection -> IO ()
+act_play :: String -> TidalState -> WS.Connection -> IO (TidalState)
 act_play param ts conn = 
   do 
     putMVar (mIn ts) param
@@ -190,12 +193,22 @@ act_play param ts conn =
                          sender ts $ "/eval " ++ param
                          S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
               Error s -> sender ts $ "/error " ++ s
-    return ()
+    return ts
 
-act_panic :: String -> TidalState -> WS.Connection -> IO ()
+act_panic :: String -> TidalState -> WS.Connection -> IO (TidalState)
 act_panic param ts conn = 
   do swapMVar (mPatterns ts) []
      dirt ts $ Tidal.silence
+     sender ts $ "/panic ok"
+     return ts
+
+act_wantbang :: String -> TidalState -> WS.Connection -> IO (TidalState)
+act_wantbang param ts conn | isJust (clockThread ts) = do sender ts $ "/wantbang ok"
+                                                          return ts
+                           | otherwise = do clockThreadId <- (forkIO $ Tidal.clockedTick 4 (onTick (sender ts)))
+                                            return $ ts {clockThread = Just clockThreadId}
+                                
+
 {-
   | isPrefixOf "/shutdown" request =
     do rawSystem "sudo" ["halt"]     
