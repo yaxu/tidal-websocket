@@ -153,6 +153,7 @@ takeNumbers xs = (takeWhile f xs, dropWhile (== ' ') $ dropWhile f xs)
   where f x = not . null $ filter (x ==) "0123456789."
 
 commands = [("play", act_play) ,
+            ("typecheck", act_typecheck) ,
             ("panic", act_panic),
             ("wantbang", act_wantbang)
             {-,
@@ -186,13 +187,24 @@ act_play param ts conn =
     putMVar (mIn ts) param
     r <- takeMVar (mOut ts)
     case r of OK p -> do updatePat ts (conn, p)
-                         --t <- (round . (* 100)) `fmap` getPOSIXTime
+                         t <- (round . (* 100)) `fmap` getPOSIXTime
                          --let fn = "/home/alex/SparkleShare/embedded/print/" ++ show t
                          -- drawText (fn ++ ".pdf") code (Tidal.dirtToColour p)
                          -- rawSystem "convert" [fn ++ ".pdf", fn ++ ".png"]
-                         sender ts $ "/eval " ++ param
+                         sender ts $ "/play ok " ++ param
                          S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
-              Error s -> sender ts $ "/error " ++ s
+              Error s -> sender ts $ "/play nok " ++ s
+    return ts
+
+act_typecheck :: String -> TidalState -> WS.Connection -> IO (TidalState)
+act_typecheck param ts conn = 
+  do 
+    putMVar (mIn ts) param
+    r <- takeMVar (mOut ts)
+    case r of OK p -> do updatePat ts (conn, p)
+                         sender ts $ "/typecheck ok " ++ param
+                         S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
+              Error s -> sender ts $ "/typecheck nok " ++ s
     return ts
 
 act_panic :: String -> TidalState -> WS.Connection -> IO (TidalState)
