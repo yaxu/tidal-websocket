@@ -1,3 +1,6 @@
+-- Released under terms of GNU Public License version 3
+-- (c) David Ogborn, Alex McLean 2017
+
 {-# LANGUAGE OverloadedStrings, FlexibleContexts #-}
 
 module Sound.Tidal.WebSocket where
@@ -16,8 +19,13 @@ import Control.Concurrent
 import System.Cmd
 import Data.Time.Clock.POSIX
 import Data.Fixed (mod')
+import Text.JSON
+import Sound.Tidal.Vis2
 
 import Sound.Tidal.Hint
+import Sound.Tidal.JSON
+import Sound.Tidal.Pattern
+
 -- import Sound.Tidal.Draw
 
 import Control.Concurrent.MVar
@@ -129,6 +137,7 @@ loop state conn = do
   -- add to dictionary of connections -> patterns, could use a map for this
   case msg of
     Right s -> do
+      putStrLn $ "msg: " ++ T.unpack s
       state' <- act state conn (T.unpack s)
       loop state' conn
     Left WS.ConnectionClosed -> close state "unexpected loss of connection"
@@ -154,6 +163,8 @@ takeNumbers xs = (takeWhile f xs, dropWhile (== ' ') $ dropWhile f xs)
 
 commands = [("play", act_play) ,
             ("typecheck", act_typecheck) ,
+            ("renderJSON", act_renderJSON) ,
+            ("renderSVG", act_renderSVG),
             ("panic", act_panic),
             ("wantbang", act_wantbang)
             {-,
@@ -186,25 +197,50 @@ act_play param ts conn =
   do 
     putMVar (mIn ts) param
     r <- takeMVar (mOut ts)
-    case r of OK p -> do updatePat ts (conn, p)
-                         t <- (round . (* 100)) `fmap` getPOSIXTime
-                         --let fn = "/home/alex/SparkleShare/embedded/print/" ++ show t
-                         -- drawText (fn ++ ".pdf") code (Tidal.dirtToColour p)
-                         -- rawSystem "convert" [fn ++ ".pdf", fn ++ ".png"]
-                         sender ts $ "/play ok " ++ param
-                         S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
-              Error s -> sender ts $ "/play nok " ++ s
+    case r of HintOK p -> do updatePat ts (conn, p)
+                             t <- (round . (* 100)) `fmap` getPOSIXTime
+                             --let fn = "/home/alex/SparkleShare/embedded/print/" ++ show t
+                             -- drawText (fn ++ ".pdf") code (Tidal.dirtToColour p)
+                             -- rawSystem "convert" [fn ++ ".pdf", fn ++ ".png"]
+                             sender ts $ "/play ok " ++ param
+                             S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
+              HintError s -> sender ts $ "/play nok " ++ s
     return ts
 
 act_typecheck :: String -> TidalState -> WS.Connection -> IO (TidalState)
 act_typecheck param ts conn = 
-  do 
+  do
+    putStrLn "typecheck"
     putMVar (mIn ts) param
+    putStrLn "typecheck put"
     r <- takeMVar (mOut ts)
-    case r of OK p -> do updatePat ts (conn, p)
-                         sender ts $ "/typecheck ok " ++ param
-                         S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
-              Error s -> sender ts $ "/typecheck nok " ++ s
+    putStrLn "typecheck pull"
+    case r of HintOK p -> do sender ts $ "/typecheck ok " ++ param
+              HintError s -> sender ts $ "/typecheck nok " ++ s
+    return ts
+
+act_renderJSON :: String -> TidalState -> WS.Connection -> IO (TidalState)
+act_renderJSON param ts conn = 
+  do
+    putStrLn "renderJSON"
+    putMVar (mIn ts) param
+    res <- takeMVar (mOut ts)
+    case res of HintOK p -> do let r = render p 1 16
+                               sender ts $ "/renderJSON ok " ++ encodeStrict r
+                HintError s -> sender ts $ "/renderJSON nok " ++ s
+
+    return ts
+
+act_renderSVG :: String -> TidalState -> WS.Connection -> IO (TidalState)
+act_renderSVG param ts conn = 
+  do
+    putStrLn "renderJSON"
+    putMVar (mIn ts) param
+    res <- takeMVar (mOut ts)
+    case res of HintOK p -> do svg <- visAsString $ Tidal.dirtToColour $ fast 12 p
+                               sender ts $ "/renderSVG ok " ++ svg
+                HintError e -> sender ts $ "/renderSVG nok " ++ e
+
     return ts
 
 act_panic :: String -> TidalState -> WS.Connection -> IO (TidalState)
@@ -215,9 +251,10 @@ act_panic param ts conn =
      return ts
 
 act_wantbang :: String -> TidalState -> WS.Connection -> IO (TidalState)
-act_wantbang param ts conn | isJust (clockThread ts) = do sender ts $ "/wantbang ok"
+act_wantbang param ts conn | isJust (clockThread ts) = do sender ts $ "/wantbang ok!"
                                                           return ts
                            | otherwise = do clockThreadId <- (forkIO $ Tidal.clockedTick 4 (onTick (sender ts)))
+                                            sender ts $ "/wantbang ok"
                                             return $ ts {clockThread = Just clockThreadId}
                                 
 

@@ -67,6 +67,7 @@ var changeList = []
 var evalList = []
 var snapshotInterval = 32
 var playback = false
+var firstTick = null;
 
 var saveData = function (data, fileName) {
     var json = JSON.stringify(data),
@@ -261,6 +262,21 @@ $( function() {
         $("#stopbtn").hide()
     }
 
+    pulseClick = function() {
+        if (lastTick > 0) {
+            diff = ((new Date().getTime()) / 1000.0) - lastTick
+            msg = "/pulse " + diff
+            console.log(msg)
+            ws.send(msg)
+        }
+    }
+
+    pulseShift = function(secs) {
+        console.log("shift " + secs)
+        msg = "/pulse " + secs
+        ws.send(msg)
+    }
+
     faster = function() {
         console.log("faster")
         msg = "/faster"
@@ -302,7 +318,7 @@ $( function() {
 	    historyPercent(pc)
         }
     });
-    var ws = new WebSocket('ws://' + window.location.host + ':9162', []);
+    var ws = new WebSocket('ws://localhost:9162', []);
     ws.onmessage = function (e) {
         var re = /\/(\w+) ((.|[\r\n])*)/
 	var m = e.data.match(re);
@@ -324,6 +340,9 @@ $( function() {
                 var tick = parseInt(data)
                 if (tick % 4 == 0) {
                     lastTick = (new Date().getTime()) / 1000.0
+		    if (firstTick == null) {
+			firstTick = lastTick
+		    }
                     //console.log("bang " + tick)
                     $("#pulse").css("background", "#fff")
                 }
