@@ -20,7 +20,9 @@ import System.Cmd
 import Data.Time.Clock.POSIX
 import Data.Fixed (mod')
 import Text.JSON
-import Sound.Tidal.Vis2
+--import Sound.Tidal.Vis2
+import Data.Digest.Pure.MD5
+import qualified Data.ByteString.Lazy.Char8 as C
 
 import Sound.Tidal.Hint
 import Sound.Tidal.JSON
@@ -48,20 +50,20 @@ data TidalState = TidalState {cxid :: Int,
                               clockThread :: Maybe ThreadId
                              }
 
-data ChangeField = ChangeField Int T.Text deriving (Show)
-data EvalField   = EvalField   Int T.Text deriving (Show)
+-- data ChangeField = ChangeField Int T.Text deriving (Show)
+-- data EvalField   = EvalField   Int T.Text deriving (Show)
 
-instance SFR.FromRow ChangeField where
-  fromRow = ChangeField <$> S.field <*> S.field
+-- instance SFR.FromRow ChangeField where
+--   fromRow = ChangeField <$> S.field <*> S.field
 
-instance S.ToRow ChangeField where
-  toRow (ChangeField id_ str) = S.toRow (id_, str)
+-- instance S.ToRow ChangeField where
+--   toRow (ChangeField id_ str) = S.toRow (id_, str)
 
-instance SFR.FromRow EvalField where
-  fromRow = EvalField <$> S.field <*> S.field
+-- instance SFR.FromRow EvalField where
+--  fromRow = EvalField <$> S.field <*> S.field
 
-instance S.ToRow EvalField where
-  toRow (EvalField id_ str) = S.toRow (id_, str)
+-- instance S.ToRow EvalField where
+--   toRow (EvalField id_ str) = S.toRow (id_, str)
 
 port = 9162
 
@@ -100,8 +102,8 @@ run = do
   mOut <- newEmptyMVar
   forkIO $ hintJob (mIn, mOut)
   sql <- S.open "test.db"
-  -- S.execute_ sql "DROP TABLE cx"
-  -- S.execute_ sql "DROP TABLE change"
+  S.execute_ sql "DROP TABLE cx"
+  S.execute_ sql "DROP TABLE change"
   S.execute_ sql "CREATE TABLE IF NOT EXISTS cx (name TEXT)"
   S.execute_ sql "CREATE TABLE IF NOT EXISTS change (cxid INTEGER, json TEXT)"
   S.execute_ sql "CREATE TABLE IF NOT EXISTS eval (cxid INTEGER, code TEXT)"
@@ -161,7 +163,8 @@ takeNumbers :: String -> (String, String)
 takeNumbers xs = (takeWhile f xs, dropWhile (== ' ') $ dropWhile f xs)
   where f x = not . null $ filter (x ==) "0123456789."
 
-commands = [("play", act_play) ,
+commands = [("play", act_play),
+            ("record", act_record),
             ("typecheck", act_typecheck) ,
             ("renderJSON", act_renderJSON) ,
             ("renderSVG", act_renderSVG),
@@ -203,9 +206,40 @@ act_play param ts conn =
                              -- drawText (fn ++ ".pdf") code (Tidal.dirtToColour p)
                              -- rawSystem "convert" [fn ++ ".pdf", fn ++ ".png"]
                              sender ts $ "/play ok " ++ param
-                             S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
+                             -- S.execute (sql ts) "INSERT INTO eval (cxid,code) VALUES (?,?)" (EvalField (cxid ts) (T.pack param))
               HintError s -> sender ts $ "/play nok " ++ s
     return ts
+
+act_record :: String -> TidalState -> WS.Connection -> IO (TidalState)
+act_record param ts conn = 
+  do 
+    putMVar (mIn ts) param
+    r <- takeMVar (mOut ts)
+    case r of HintOK p -> do let fn = makeFilename param
+                             runaud p fn 1
+                             sender ts $ "/record ok " ++ fn
+              HintError s -> sender ts $ "/record nok " ++ s
+    return ts
+
+runaud pat filename cps =
+  do let seconds = 12
+     putStrLn "fffsss  runaud"
+     (setCps, _, getNow) <- Tidal.cpsUtils'
+     setCps cps
+     (d,_) <- Tidal.superDirtSetters getNow
+     putStrLn $ "ecasound -t:" ++ show (seconds+2) ++ " -i jack,SuperCollider -o " ++ filename ++ " &"
+     system $ "ecasound -t:" ++ show (seconds+2) ++ " -i jack,SuperCollider -o " ++ filename ++ " &"
+     d pat
+     threadDelay (seconds * 1000000)
+     d silence
+     threadDelay (2 * 1000000)
+     return []
+
+
+makeFilename code = "sounds/" ++ (map switchSlashes $ show $ md5 $ C.pack code) ++ ".flac"
+  where switchSlashes '/' = '_'
+        switchSlashes x = x
+
 
 act_typecheck :: String -> TidalState -> WS.Connection -> IO (TidalState)
 act_typecheck param ts conn = 
@@ -237,7 +271,7 @@ act_renderSVG param ts conn =
     putStrLn "renderJSON"
     putMVar (mIn ts) param
     res <- takeMVar (mOut ts)
-    case res of HintOK p -> do svg <- visAsString $ Tidal.dirtToColour $ fast 12 p
+    case res of HintOK p -> do let svg = "foo" -- svg <- visAsString $ Tidal.dirtToColour $ fast 12 p
                                sender ts $ "/renderSVG ok " ++ svg
                 HintError e -> sender ts $ "/renderSVG nok " ++ e
 
