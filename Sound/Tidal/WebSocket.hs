@@ -20,7 +20,7 @@ import System.Cmd
 import Data.Time.Clock.POSIX
 import Data.Fixed (mod')
 import Text.JSON
---import Sound.Tidal.Vis2
+import Sound.Tidal.VisCycle
 import Data.Digest.Pure.MD5
 import qualified Data.ByteString.Lazy.Char8 as C
 
@@ -215,8 +215,10 @@ act_record param ts conn =
   do 
     putMVar (mIn ts) param
     r <- takeMVar (mOut ts)
-    case r of HintOK p -> do let fn = makeFilename param
+    case r of HintOK p -> do let fn = makeFilename param ".mp3"
                              runaud p fn 1
+			     let barefn = makeFilename param ""
+			     runimg p barefn
                              sender ts $ "/record ok " ++ fn
               HintError s -> sender ts $ "/record nok " ++ s
     return ts
@@ -235,11 +237,14 @@ runaud pat filename cps =
      threadDelay (2 * 1000000)
      return []
 
+runimg pat filename =
+  do visCycle filename "" $ Tidal.dirtToColour $ fast 12 pat
+     system $ "inkscape " ++ filename ++ ".pdf -d 300 -e " ++ filename ++ ".png"
 
-makeFilename code = "sounds/" ++ (map switchSlashes $ show $ md5 $ C.pack code) ++ ".flac"
+makeFilename code ext = "sounds/" ++ (map switchSlashes $ show $ md5 $ C.pack code) ++ ext
   where switchSlashes '/' = '_'
         switchSlashes x = x
-
+	
 
 act_typecheck :: String -> TidalState -> WS.Connection -> IO (TidalState)
 act_typecheck param ts conn = 
