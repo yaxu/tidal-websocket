@@ -224,7 +224,7 @@ act_record param ts conn =
     return ts
 
 runaud pat filename cps =
-  do let seconds = 12
+  do let seconds = 20
      putStrLn "fffsss  runaud"
      (setCps, _, getNow) <- Tidal.cpsUtils'
      setCps cps
@@ -240,6 +240,7 @@ runaud pat filename cps =
 runimg pat filename =
   do visCycle filename "" $ Tidal.dirtToColour $ fast 12 pat
      system $ "inkscape " ++ filename ++ ".pdf -d 300 -e " ++ filename ++ ".png"
+     system $ "inkscape " ++ filename ++ ".pdf -d 2000 -e " ++ filename ++ ".hd.png"
 
 makeFilename code ext = "sounds/" ++ (map switchSlashes $ show $ md5 $ C.pack code) ++ ext
   where switchSlashes '/' = '_'
